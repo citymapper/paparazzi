@@ -1,10 +1,14 @@
 apply plugin: 'com.github.ben-manes.versions'
 
 buildscript {
+  // maps to this commit: https://android.googlesource.com/platform/prebuilts/studio/layoutlib/+/b169460c8473a1e87aafa01da881556682fa4f86
+  // which runs on JDK 11
+  ext.layoutLibPrebuiltSha = 'ae77d65'
+
   ext.versions = [
     kotlin: '1.4.31',
     agp: '4.1.2',
-    layoutlib: '4.0.0-alpha02-b169460', // "should" be similar to versions.agp
+    layoutlib: "4.1.0-$layoutLibPrebuiltSha", // "should" be similar to versions.agp
     androidTools: '27.1.2', // agp + 23.0.0 = androidTools
     jcodec: '0.2.5',
     moshi: '1.11.0',
@@ -16,6 +20,7 @@ buildscript {
     plugins: [
       android: "com.android.tools.build:gradle:${versions.agp}",
       kotlin: "org.jetbrains.kotlin:kotlin-gradle-plugin:${versions.kotlin}",
+      publish: 'com.vanniktech:gradle-maven-publish-plugin:0.14.2',
     ],
     kotlin: [
       stdlib: [
@@ -36,7 +41,14 @@ buildscript {
     androidx: [
       annotations: 'androidx.annotation:annotation:1.1.0'
     ],
-    layoutlib: "app.cash.paparazzi:layoutlib-jdk11:${versions.layoutlib}",
+    layoutlib: [
+      native: [
+        jdk11: "app.cash.paparazzi:layoutlib-native-jdk11:${versions.layoutlib}",
+        macOsX: "app.cash.paparazzi:native-macosx:${versions.layoutlib}",
+        windows: "app.cash.paparazzi:native-win:${versions.layoutlib}",
+        linux: "app.cash.paparazzi:native-linux:${versions.layoutlib}",
+      ]
+    ],
     okio: 'com.squareup.okio:okio:2.8.0',
     moshi: [
       core: "com.squareup.moshi:moshi:${versions.moshi}",
@@ -51,6 +63,7 @@ buildscript {
       core: "net.bytebuddy:byte-buddy:${versions.bytebuddy}",
       agent: "net.bytebuddy:byte-buddy-agent:${versions.bytebuddy}",
     ],
+    grgit: 'org.ajoberstar.grgit:grgit-gradle:4.1.0',
     guava: 'com.google.guava:guava:30.1-jre',
     junit: 'junit:junit:4.13.2',
     truth: 'com.google.truth:truth:1.1.2',
@@ -62,12 +75,15 @@ buildscript {
     mavenCentral()
     google()
     jcenter()
-    //mavenLocal()
+    mavenLocal()
+    gradlePluginPortal()
   }
 
   dependencies {
     classpath deps.plugins.kotlin
     classpath deps.plugins.android
+    classpath deps.plugins.publish
+    classpath deps.grgit
     classpath 'com.github.ben-manes:gradle-versions-plugin:0.36.0'
     classpath 'org.jetbrains.dokka:dokka-gradle-plugin:0.9.18'
     classpath "app.cash.paparazzi:paparazzi-gradle-plugin:${versions.releasedPaparazzi}"
@@ -82,7 +98,8 @@ subprojects {
     maven {
       url 'https://dl.bintray.com/kotlin/dokka'
     }
-    //mavenLocal()
+    mavenLocal()
+    gradlePluginPortal()
   }
 
   group = GROUP

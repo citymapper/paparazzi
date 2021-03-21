@@ -10,7 +10,7 @@ Note that layoutlib's version tracks [Android Studio Releases][studio_releases] 
 
 
     ```
-    ./gradlew  :libs:layoutlib:publishMavenJavaPublicationToMavenRepository
+    ./gradlew  :libs:layoutlib:publishMavenNativeLibraryPublicationToMavenRepository
     ```
 
    This may take a few minutes. It clones a large repo (2.4 GiB) and then uploads a large artifact

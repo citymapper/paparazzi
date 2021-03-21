@@ -15,13 +15,19 @@
  */
 package app.cash.paparazzi.gradle
 
+import app.cash.paparazzi.NATIVE_LIB_VERSION
 import app.cash.paparazzi.VERSION
 import com.android.build.gradle.LibraryExtension
 import org.gradle.api.Plugin
 import org.gradle.api.Project
+import org.gradle.api.artifacts.Configuration
+import org.gradle.api.artifacts.type.ArtifactTypeDefinition
+import org.gradle.api.internal.artifacts.ArtifactAttributes
+import org.gradle.api.internal.artifacts.transform.UnzipTransform
 import org.gradle.api.logging.LogLevel.LIFECYCLE
 import org.gradle.api.plugins.JavaBasePlugin
 import org.gradle.api.tasks.testing.Test
+import org.gradle.internal.os.OperatingSystem
 import org.jetbrains.kotlin.gradle.plugin.KotlinBasePluginWrapper
 import java.util.Locale
 
@@ -33,9 +39,7 @@ class PaparazziPlugin : Plugin<Project> {
       "The Android Gradle library plugin must be applied before the Paparazzi plugin."
     }
 
-    project.configurations.getByName("testImplementation").dependencies.add(
-        project.dependencies.create("app.cash.paparazzi:paparazzi:$VERSION")
-    )
+    val unzipConfiguration = project.setupPlatformDataTransform()
 
     // Create anchor tasks for all variants.
     val verifyVariants = project.tasks.register("verifyPaparazzi")
@@ -56,6 +60,7 @@ class PaparazziPlugin : Plugin<Project> {
       ) { task ->
         task.mergeResourcesOutput.set(mergeResourcesOutputDir)
         task.mergeAssetsOutput.set(mergeAssetsOutputDir)
+        task.platformDataRoot.set(unzipConfiguration.singleFile)
         task.paparazziResources.set(project.layout.buildDirectory.file("intermediates/paparazzi/${variant.name}/resources.txt"))
       }
 
@@ -106,5 +111,35 @@ class PaparazziPlugin : Plugin<Project> {
         }
       }
     }
+  }
+
+  private fun Project.setupPlatformDataTransform(): Configuration {
+    configurations.getByName("testImplementation").dependencies.add(
+        dependencies.create("app.cash.paparazzi:paparazzi:$VERSION")
+    )
+
+    val unzipConfiguration = configurations.create("unzip")
+    unzipConfiguration.attributes.attribute(
+        ArtifactAttributes.ARTIFACT_FORMAT, ArtifactTypeDefinition.DIRECTORY_TYPE
+    )
+    configurations.add(unzipConfiguration)
+
+    val operatingSystem = OperatingSystem.current()
+    val nativeLibraryArtifactId = when {
+      operatingSystem.isMacOsX -> "macosx"
+      operatingSystem.isWindows -> "win"
+      else -> "linux"
+    }
+    unzipConfiguration.dependencies.add(
+        dependencies.create("app.cash.paparazzi:native-$nativeLibraryArtifactId:$NATIVE_LIB_VERSION")
+    )
+    dependencies.registerTransform(UnzipTransform::class.java) { transform ->
+      transform.from.attribute(ArtifactAttributes.ARTIFACT_FORMAT, ArtifactTypeDefinition.JAR_TYPE)
+      transform.to.attribute(
+          ArtifactAttributes.ARTIFACT_FORMAT, ArtifactTypeDefinition.DIRECTORY_TYPE
+      )
+    }
+
+    return unzipConfiguration
   }
 }

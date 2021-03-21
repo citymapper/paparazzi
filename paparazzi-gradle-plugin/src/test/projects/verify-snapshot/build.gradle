@@ -19,3 +19,9 @@ android {
     minSdkVersion 25
   }
 }
+
+tasks.withType(Test).configureEach {task ->
+  task.testLogging {
+    showStandardStreams true
+  }
+}
