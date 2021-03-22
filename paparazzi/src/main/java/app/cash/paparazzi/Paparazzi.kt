@@ -19,7 +19,7 @@ import android.content.Context
 import android.content.res.Resources
 import android.util.AttributeSet
 import android.view.BridgeInflater
-import android.view.Choreographer_Delegate
+import android.view.Choreographer
 import android.view.LayoutInflater
 import android.view.View
 import android.view.ViewGroup
@@ -227,12 +227,14 @@ class Paparazzi(
       val viewGroup = bridgeRenderSession.rootViews[0].viewObject as ViewGroup
       try {
         withTime(0L) {
+          // Initialize the choreographer at time=0.
         }
 
         viewGroup.addView(view)
         for (frame in 0 until frameCount) {
           val nowNanos = (startNanos + (frame * 1_000_000_000.0 / fps)).toLong()
           withTime(nowNanos) {
+            renderSession.setElapsedFrameTimeNanos(nowNanos)
             val result = renderSession.render(true)
             if (result.status == ERROR_UNKNOWN) {
               throw result.exception
@@ -258,13 +260,14 @@ class Paparazzi(
     val frameNanos = TIME_OFFSET_NANOS + timeNanos
 
     // Execute the block at the requested time.
-    System_Delegate.setBootTimeNanos(frameNanos)
+//    System_Delegate.setBootTimeNanos(frameNanos)
     System_Delegate.setNanosTime(frameNanos)
+    Choreographer.getInstance().doFrame(frameNanos, 0)
     try {
       block()
     } finally {
-      System_Delegate.setNanosTime(0L)
-      System_Delegate.setBootTimeNanos(0L)
+//      System_Delegate.setNanosTime(0L)
+//      System_Delegate.setBootTimeNanos(0L)
     }
   }
 
