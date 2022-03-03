@@ -82,9 +82,9 @@ class Paparazzi @JvmOverloads constructor(
   private val appCompatEnabled: Boolean = true,
   private val maxPercentDifference: Double = 0.1,
   private val snapshotHandler: SnapshotHandler = determineHandler(maxPercentDifference),
-  private val renderExtensions: Set<RenderExtension> = setOf()
+  private val renderExtensions: Set<RenderExtension> = setOf(),
+  private val minThumbnailSize: Int = 1000 // Set to 0 to not scale the result image.
 ) : TestRule {
-  private val THUMBNAIL_SIZE = 1000
 
   private val logger = PaparazziLogger()
   private lateinit var sessionParamsBuilder: SessionParamsBuilder
@@ -291,7 +291,10 @@ class Paparazzi @JvmOverloads constructor(
               throw result.exception
             }
 
-            val image = bridgeRenderSession.image
+            var image = bridgeRenderSession.image
+            renderExtensions.forEach {
+              image = it.renderImage(view, image)
+            }
             frameHandler.handle(scaleImage(image))
           }
         }
@@ -364,7 +367,10 @@ class Paparazzi @JvmOverloads constructor(
 
   private fun scaleImage(image: BufferedImage): BufferedImage {
     val maxDimension = Math.max(image.width, image.height)
-    val scale = THUMBNAIL_SIZE / maxDimension.toDouble()
+    if (minThumbnailSize <= 0) {
+      return image
+    }
+    val scale = minThumbnailSize / maxDimension.toDouble()
     return ImageUtils.scale(image, scale, scale)
   }
 

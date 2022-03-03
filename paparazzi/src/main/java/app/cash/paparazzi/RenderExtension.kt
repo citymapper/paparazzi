@@ -28,4 +28,6 @@ interface RenderExtension {
    * Returns the root view of the modified hierarchy.
    */
   fun renderView(contentView: View): View
+
+  fun renderImage(contentView: View, generatedImage: BufferedImage): BufferedImage
 }

@@ -32,6 +32,7 @@ import app.cash.paparazzi.accessibility.RenderSettings.getColor
 import app.cash.paparazzi.accessibility.RenderSettings.toColorInt
 import app.cash.paparazzi.accessibility.RenderSettings.withAlpha
 import java.util.concurrent.atomic.AtomicInteger
+import java.awt.image.BufferedImage
 
 class AccessibilityRenderExtension : RenderExtension {
   override fun renderView(
@@ -99,6 +100,8 @@ class AccessibilityRenderExtension : RenderExtension {
 
     return accessibilityViews
   }
+
+  override fun renderImage(contentView: View, generatedImage: BufferedImage): BufferedImage = generatedImage
 
   private fun buildAccessibilityView(contentView: View): View {
     val linearLayout = LinearLayout(contentView.context).apply {
