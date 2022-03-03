@@ -113,23 +113,37 @@ class Paparazzi @JvmOverloads constructor(
     base: Statement,
     description: Description
   ): Statement {
-    val statement = object : Statement() {
-      override fun evaluate() {
-        prepare(description)
-        try {
+    // The first call in sets up the instance, whether it's a method rule or a class rule.
+    if (!this::renderer.isInitialized) {
+      val statement = object : Statement() {
+        override fun evaluate() {
+          prepare(description)
+          try {
+            base.evaluate()
+          } finally {
+            close()
+          }
+        }
+      }
+
+      registerFontLookupInterceptionIfResourceCompatDetected()
+      registerViewEditModeInterception()
+      registerMatrixMultiplyInterception()
+
+      val outerRule = AgentTestRule()
+      return outerRule.apply(statement, description)
+    } else if (description.isTest) {
+      // Instance has been prepared via a class rule and we're now being called for the test rule
+      // with the method name.
+      return object : Statement() {
+        override fun evaluate() {
+          setDescription(description)
           base.evaluate()
-        } finally {
-          close()
         }
       }
     }
 
-    registerFontLookupInterceptionIfResourceCompatDetected()
-    registerViewEditModeInterception()
-    registerMatrixMultiplyInterception()
-
-    val outerRule = AgentTestRule()
-    return outerRule.apply(statement, description)
+    return base
   }
 
   fun prepare(description: Description) {
@@ -139,7 +153,11 @@ class Paparazzi @JvmOverloads constructor(
       PaparazziCallback(logger, environment.packageName, environment.resourcePackageNames)
     layoutlibCallback.initResources()
 
-    testName = description.toTestName()
+    // If we're running as a ClassRule, the methodName will not be populated. Defer the description
+    // handling until the test rule is executed.
+    if (!description.methodName.isNullOrEmpty()) {
+      setDescription(description)
+    }
 
     renderer = Renderer(environment, layoutlibCallback, logger, maxPercentDifference)
     sessionParamsBuilder = renderer.prepare()
@@ -164,6 +182,10 @@ class Paparazzi @JvmOverloads constructor(
     }
 
     bridgeRenderSession = createBridgeSession(renderSession, renderSession.inflate())
+  }
+
+  fun setDescription(description: Description) {
+    testName = description.toTestName()
   }
 
   fun close() {
@@ -267,7 +289,11 @@ class Paparazzi @JvmOverloads constructor(
       bridgeRenderSession = createBridgeSession(renderSession, renderSession.inflate())
     }
 
-    val snapshot = Snapshot(name, testName!!, Date())
+    val testName = checkNotNull(testName) {
+      "To use Paparazzi as a @ClassRule, it must also be a @Rule."
+    }
+
+    val snapshot = Snapshot(name, testName, Date())
 
     val frameHandler = snapshotHandler.newFrameHandler(snapshot, frameCount, fps)
     frameHandler.use {
