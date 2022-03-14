@@ -43,10 +43,11 @@ internal data class SessionParamsBuilder(
   private val flags: Map<Key<*>, Any> = mapOf(),
   private val themeName: String? = null,
   private val isProjectTheme: Boolean = false,
-  private val layoutPullParser: LayoutPullParser? = null,
+  private val layoutPullParser: LayoutPullParserSpec? = null,
   private val projectKey: Any? = null,
   private val minSdk: Int = 0,
-  private val decor: Boolean = true
+  private val decor: Boolean = true,
+  val appCompat: Boolean = true
 ) {
   fun withTheme(
     themeName: String,
@@ -90,7 +91,7 @@ internal data class SessionParamsBuilder(
     )
 
     val result = SessionParams(
-        layoutPullParser, renderingMode, projectKey /* for caching */,
+        layoutPullParser?.create(), renderingMode, projectKey /* for caching */,
         deviceConfig.hardwareConfig, resourceResolver, layoutlibCallback, minSdk, targetSdk, logger
     )
     result.fontScale = deviceConfig.fontScale
@@ -105,5 +106,23 @@ internal data class SessionParamsBuilder(
     }
 
     return result
+  }
+
+  sealed class LayoutPullParserSpec {
+
+    abstract fun create(): LayoutPullParser
+
+    data class FromString(val contents: String): LayoutPullParserSpec() {
+      override fun create() = LayoutPullParser.createFromString(contents)
+    }
+
+    data class FromPath(val layoutPath: String): LayoutPullParserSpec() {
+      override fun create() = LayoutPullParser.createFromPath(layoutPath)
+    }
+
+    companion object {
+      fun fromString(contents: String): LayoutPullParserSpec = FromString(contents)
+      fun fromPath(layoutPath: String): LayoutPullParserSpec = FromPath(layoutPath)
+    }
   }
 }

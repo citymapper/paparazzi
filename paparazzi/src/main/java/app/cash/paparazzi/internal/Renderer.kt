@@ -186,8 +186,8 @@ internal class Renderer(
     return result
   }
 
-  fun createParserFromPath(layoutPath: String): LayoutPullParser =
-    LayoutPullParser.createFromPath("${environment.resDir}/layout/$layoutPath")
+  fun createParserFromPath(layoutPath: String): SessionParamsBuilder.LayoutPullParserSpec =
+    SessionParamsBuilder.LayoutPullParserSpec.fromPath("${environment.resDir}/layout/$layoutPath")
 
   /**
    * Create a new rendering session and test that rendering the given layout on given device

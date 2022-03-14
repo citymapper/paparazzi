@@ -21,7 +21,6 @@ import android.content.res.Resources
 import android.graphics.Bitmap
 import android.os.Handler_Delegate
 import android.os.SystemClock_Delegate
-import android.util.AttributeSet
 import android.util.DisplayMetrics
 import android.view.BridgeInflater
 import android.view.Choreographer
@@ -47,32 +46,30 @@ import app.cash.paparazzi.internal.EditModeInterceptor
 import app.cash.paparazzi.internal.ImageUtils
 import app.cash.paparazzi.internal.MatrixMatrixMultiplicationInterceptor
 import app.cash.paparazzi.internal.MatrixVectorMultiplicationInterceptor
-import app.cash.paparazzi.internal.parsers.LayoutPullParser
 import app.cash.paparazzi.internal.PaparazziCallback
 import app.cash.paparazzi.internal.PaparazziLogger
 import app.cash.paparazzi.internal.Renderer
 import app.cash.paparazzi.internal.ResourcesInterceptor
 import app.cash.paparazzi.internal.SessionParamsBuilder
-import com.android.ide.common.rendering.api.RenderSession
 import com.android.ide.common.rendering.api.Result
 import com.android.ide.common.rendering.api.Result.Status.ERROR_UNKNOWN
 import com.android.ide.common.rendering.api.SessionParams
+import com.android.ide.common.rendering.api.SessionParams.RenderingMode
 import com.android.internal.lang.System_Delegate
 import com.android.layoutlib.bridge.Bridge
-import com.android.ide.common.rendering.api.SessionParams.RenderingMode
-import com.android.layoutlib.bridge.Bridge.cleanupThread
-import com.android.layoutlib.bridge.Bridge.prepareThread
 import com.android.layoutlib.bridge.BridgeRenderSession
 import com.android.layoutlib.bridge.impl.RenderAction
 import com.android.layoutlib.bridge.impl.RenderSessionImpl
-import org.junit.rules.TestRule
-import org.junit.runner.Description
-import org.junit.runners.model.Statement
 import java.awt.image.BufferedImage
 import java.lang.reflect.Field
 import java.lang.reflect.Modifier
 import java.util.Date
 import java.util.concurrent.TimeUnit
+import kotlin.time.ExperimentalTime
+import kotlin.time.measureTime
+import org.junit.rules.TestRule
+import org.junit.runner.Description
+import org.junit.runners.model.Statement
 
 class Paparazzi @JvmOverloads constructor(
   private val environment: Environment = detectEnvironment(),
@@ -88,10 +85,11 @@ class Paparazzi @JvmOverloads constructor(
   private val THUMBNAIL_SIZE = 1000
 
   private val logger = PaparazziLogger()
+  private val rendererScope = managedRendererScope ?: RendererScope()
+  private val cleanupRendererScope = managedRendererScope == null
   private lateinit var sessionParamsBuilder: SessionParamsBuilder
   private lateinit var renderer: Renderer
-  private lateinit var renderSession: RenderSessionImpl
-  private lateinit var bridgeRenderSession: RenderSession
+  private lateinit var renderSession: PaparazziRenderSession
   private var testName: TestName? = null
 
   val layoutInflater: LayoutInflater
@@ -142,52 +140,36 @@ class Paparazzi @JvmOverloads constructor(
 
     testName = description.toTestName()
 
-    if (managedRendererScope == null) {
-      // Renderer lifecycle internally managed by Paparazzi
-      renderer = Renderer(environment, layoutlibCallback, logger, maxPercentDifference)
-      sessionParamsBuilder = renderer.prepare()
-    } else if (!managedRendererScope.isInitialized) {
+    if (!rendererScope.isInitialized) {
       // Renderer lifecycle externally managed by user, initialization
       renderer = Renderer(environment, layoutlibCallback, logger, maxPercentDifference)
       sessionParamsBuilder = renderer.prepare()
-      managedRendererScope.renderer = renderer
-      managedRendererScope.sessionParamsBuilder = sessionParamsBuilder
+      rendererScope.renderer = renderer
+      rendererScope.sessionParamsBuilder = sessionParamsBuilder
     } else {
       // Renderer lifecycle externally managed by user, potentially subsequent runs
-      renderer = managedRendererScope.renderer
-      sessionParamsBuilder = managedRendererScope.sessionParamsBuilder
+      renderer = rendererScope.renderer
+      sessionParamsBuilder = rendererScope.sessionParamsBuilder
     }
 
     sessionParamsBuilder = sessionParamsBuilder
         .copy(
-            layoutPullParser = LayoutPullParser.createFromString(contentRoot),
+            layoutPullParser = SessionParamsBuilder.LayoutPullParserSpec.fromString(contentRoot),
             deviceConfig = deviceConfig,
-            renderingMode = renderingMode
+            renderingMode = renderingMode,
+            appCompat = appCompatEnabled
         )
         .withTheme(theme)
 
-    val sessionParams = sessionParamsBuilder.build()
-    renderSession = createRenderSession(sessionParams)
-    prepareThread()
-    renderSession.init(sessionParams.timeout)
+    renderSession = rendererScope.renderSession(sessionParamsBuilder, logger)
     Bitmap.setDefaultDensity(DisplayMetrics.DENSITY_DEVICE_STABLE)
-
-    // requires LayoutInflater to be created, which is a side-effect of RenderSessionImpl.init()
-    if (appCompatEnabled) {
-      initializeAppCompatIfPresent()
-    }
-
-    bridgeRenderSession = createBridgeSession(renderSession, renderSession.inflate())
   }
 
   fun close() {
     testName = null
-    if (managedRendererScope == null) {
-      renderer.close()
+    if (cleanupRendererScope) {
+      rendererScope.close()
     }
-    renderSession.release()
-    bridgeRenderSession.dispose()
-    cleanupThread()
     snapshotHandler.close()
   }
 
@@ -260,7 +242,8 @@ class Paparazzi @JvmOverloads constructor(
       sessionParamsBuilder = sessionParamsBuilder
           .copy(
               // Required to reset underlying parser stream
-              layoutPullParser = LayoutPullParser.createFromString(contentRoot)
+              layoutPullParser = SessionParamsBuilder.LayoutPullParserSpec.fromString(contentRoot),
+              appCompat = appCompatEnabled
           )
 
       if (deviceConfig != null) {
@@ -275,19 +258,15 @@ class Paparazzi @JvmOverloads constructor(
         sessionParamsBuilder = sessionParamsBuilder.copy(renderingMode = renderingMode)
       }
 
-      val sessionParams = sessionParamsBuilder.build()
-      renderSession = createRenderSession(sessionParams)
-      prepareThread()
-      renderSession.init(sessionParams.timeout)
+      renderSession = rendererScope.renderSession(sessionParamsBuilder, logger)
       Bitmap.setDefaultDensity(DisplayMetrics.DENSITY_DEVICE_STABLE)
-      bridgeRenderSession = createBridgeSession(renderSession, renderSession.inflate())
     }
 
     val snapshot = Snapshot(name, testName!!, Date())
 
     val frameHandler = snapshotHandler.newFrameHandler(snapshot, frameCount, fps)
     frameHandler.use {
-      val viewGroup = bridgeRenderSession.rootViews[0].viewObject as ViewGroup
+      val viewGroup = renderSession.rootViews[0].viewObject as ViewGroup
       val modifiedView = renderExtensions.fold(view) { view, renderExtension ->
         renderExtension.renderView(view)
       }
@@ -307,7 +286,7 @@ class Paparazzi @JvmOverloads constructor(
               throw result.exception
             }
 
-            val image = bridgeRenderSession.image
+            val image = renderSession.image
             frameHandler.handle(scaleImage(image))
           }
         }
@@ -427,77 +406,6 @@ class Paparazzi @JvmOverloads constructor(
           modifiersField.setInt(this, modifiers and Modifier.FINAL.inv())
           setInt(null, compileSdkVersion)
         }
-  }
-
-  private fun initializeAppCompatIfPresent() {
-    lateinit var appCompatDelegateClass: Class<*>
-    try {
-      // See androidx.appcompat.widget.AppCompatDrawableManager#preload()
-      val appCompatDrawableManagerClass =
-        Class.forName("androidx.appcompat.widget.AppCompatDrawableManager")
-      val preloadMethod = appCompatDrawableManagerClass.getMethod("preload")
-      preloadMethod.invoke(null)
-
-      appCompatDelegateClass = Class.forName("androidx.appcompat.app.AppCompatDelegate")
-    } catch (e: ClassNotFoundException) {
-      logger.verbose("AppCompat not found on classpath")
-      return
-    }
-
-    // See androidx.appcompat.app.AppCompatDelegateImpl#installViewFactory()
-    if (layoutInflater.factory == null) {
-      layoutInflater.factory2 = object : LayoutInflater.Factory2 {
-        override fun onCreateView(
-          parent: View?,
-          name: String,
-          context: Context,
-          attrs: AttributeSet
-        ): View? {
-          val appCompatViewInflaterClass =
-            Class.forName("androidx.appcompat.app.AppCompatViewInflater")
-
-          val createViewMethod = appCompatViewInflaterClass
-              .getDeclaredMethod(
-                  "createView",
-                  View::class.java,
-                  String::class.java,
-                  Context::class.java,
-                  AttributeSet::class.java,
-                  Boolean::class.javaPrimitiveType,
-                  Boolean::class.javaPrimitiveType,
-                  Boolean::class.javaPrimitiveType,
-                  Boolean::class.javaPrimitiveType
-              )
-              .apply { isAccessible = true }
-
-          val inheritContext = true
-          val readAndroidTheme = true
-          val readAppTheme = true
-          val wrapContext = true
-
-          val newAppCompatViewInflaterInstance = appCompatViewInflaterClass
-              .getConstructor()
-              .newInstance()
-
-          return createViewMethod.invoke(
-              newAppCompatViewInflaterInstance, parent, name, context, attrs,
-              inheritContext, readAndroidTheme, readAppTheme, wrapContext
-          ) as View?
-        }
-
-        override fun onCreateView(
-          name: String,
-          context: Context,
-          attrs: AttributeSet
-        ): View? = onCreateView(null, name, context, attrs)
-      }
-    } else {
-      if (!appCompatDelegateClass.isAssignableFrom(layoutInflater.factory2::class.java)) {
-        throw IllegalStateException(
-            "The LayoutInflater already has a Factory installed so we can not install AppCompat's"
-        )
-      }
-    }
   }
 
   /**
