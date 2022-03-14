@@ -1,6 +1,7 @@
 package app.cash.paparazzi.agent
 
 import net.bytebuddy.ByteBuddy
+import net.bytebuddy.agent.ByteBuddyAgent
 import net.bytebuddy.dynamic.loading.ClassReloadingStrategy
 import net.bytebuddy.implementation.MethodDelegation
 import net.bytebuddy.matcher.ElementMatchers
@@ -36,6 +37,7 @@ object InterceptorRegistrar {
   }
 
   fun registerMethodInterceptors() {
+    ByteBuddyAgent.install()
     methodInterceptors.forEach { it.invoke() }
   }
 

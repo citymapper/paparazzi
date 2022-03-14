@@ -40,24 +40,16 @@ import androidx.savedstate.SavedStateRegistry
 import androidx.savedstate.SavedStateRegistryController
 import androidx.savedstate.SavedStateRegistryOwner
 import androidx.savedstate.ViewTreeSavedStateRegistryOwner
-import app.cash.paparazzi.agent.AgentTestRule
-import app.cash.paparazzi.agent.InterceptorRegistrar
-import app.cash.paparazzi.internal.EditModeInterceptor
 import app.cash.paparazzi.internal.ImageUtils
-import app.cash.paparazzi.internal.MatrixMatrixMultiplicationInterceptor
-import app.cash.paparazzi.internal.MatrixVectorMultiplicationInterceptor
 import app.cash.paparazzi.internal.PaparazziCallback
 import app.cash.paparazzi.internal.PaparazziLogger
 import app.cash.paparazzi.internal.Renderer
-import app.cash.paparazzi.internal.ResourcesInterceptor
 import app.cash.paparazzi.internal.SessionParamsBuilder
-import com.android.ide.common.rendering.api.Result
 import com.android.ide.common.rendering.api.Result.Status.ERROR_UNKNOWN
 import com.android.ide.common.rendering.api.SessionParams
 import com.android.ide.common.rendering.api.SessionParams.RenderingMode
 import com.android.internal.lang.System_Delegate
 import com.android.layoutlib.bridge.Bridge
-import com.android.layoutlib.bridge.BridgeRenderSession
 import com.android.layoutlib.bridge.impl.RenderAction
 import com.android.layoutlib.bridge.impl.RenderSessionImpl
 import java.awt.image.BufferedImage
@@ -65,8 +57,6 @@ import java.lang.reflect.Field
 import java.lang.reflect.Modifier
 import java.util.Date
 import java.util.concurrent.TimeUnit
-import kotlin.time.ExperimentalTime
-import kotlin.time.measureTime
 import org.junit.rules.TestRule
 import org.junit.runner.Description
 import org.junit.runners.model.Statement
@@ -112,7 +102,7 @@ class Paparazzi @JvmOverloads constructor(
     base: Statement,
     description: Description
   ): Statement {
-    val statement = object : Statement() {
+    return object : Statement() {
       override fun evaluate() {
         prepare(description)
         try {
@@ -122,13 +112,6 @@ class Paparazzi @JvmOverloads constructor(
         }
       }
     }
-
-    registerFontLookupInterceptionIfResourceCompatDetected()
-    registerViewEditModeInterception()
-    registerMatrixMultiplyInterception()
-
-    val outerRule = AgentTestRule()
-    return outerRule.apply(statement, description)
   }
 
   fun prepare(description: Description) {
@@ -141,13 +124,14 @@ class Paparazzi @JvmOverloads constructor(
     testName = description.toTestName()
 
     if (!rendererScope.isInitialized) {
-      // Renderer lifecycle externally managed by user, initialization
+      // Internally managed renderer scope, or the initial run
+      rendererScope.setup(logger)
       renderer = Renderer(environment, layoutlibCallback, logger, maxPercentDifference)
       sessionParamsBuilder = renderer.prepare()
       rendererScope.renderer = renderer
       rendererScope.sessionParamsBuilder = sessionParamsBuilder
     } else {
-      // Renderer lifecycle externally managed by user, potentially subsequent runs
+      // Subsequent runs
       renderer = rendererScope.renderer
       sessionParamsBuilder = rendererScope.sessionParamsBuilder
     }
@@ -235,10 +219,6 @@ class Paparazzi @JvmOverloads constructor(
     frameCount: Int
   ) {
     if (deviceConfig != null || theme != null || renderingMode != null) {
-      renderSession.release()
-      bridgeRenderSession.dispose()
-      cleanupThread()
-
       sessionParamsBuilder = sessionParamsBuilder
           .copy(
               // Required to reset underlying parser stream
@@ -342,21 +322,6 @@ class Paparazzi @JvmOverloads constructor(
     return renderSession
   }
 
-  private fun createBridgeSession(
-    renderSession: RenderSessionImpl,
-    result: Result
-  ): BridgeRenderSession {
-    try {
-      val bridgeSessionClass = Class.forName("com.android.layoutlib.bridge.BridgeRenderSession")
-      val constructor =
-        bridgeSessionClass.getDeclaredConstructor(RenderSessionImpl::class.java, Result::class.java)
-      constructor.isAccessible = true
-      return constructor.newInstance(renderSession, result) as BridgeRenderSession
-    } catch (e: Exception) {
-      throw RuntimeException(e)
-    }
-  }
-
   private fun scaleImage(image: BufferedImage): BufferedImage {
     val maxDimension = Math.max(image.width, image.height)
     val scale = THUMBNAIL_SIZE / maxDimension.toDouble()
@@ -408,43 +373,6 @@ class Paparazzi @JvmOverloads constructor(
         }
   }
 
-  /**
-   * Current workaround for supporting custom fonts when constructing views in code. This check
-   * may be used or expanded to support other cases requiring similar method interception
-   * techniques.
-   *
-   * See:
-   * https://github.com/cashapp/paparazzi/issues/119
-   * https://issuetracker.google.com/issues/156065472
-   */
-  private fun registerFontLookupInterceptionIfResourceCompatDetected() {
-    try {
-      val resourcesCompatClass = Class.forName("androidx.core.content.res.ResourcesCompat")
-      InterceptorRegistrar.addMethodInterceptor(
-          resourcesCompatClass, "getFont", ResourcesInterceptor::class.java
-      )
-    } catch (e: ClassNotFoundException) {
-      logger.verbose("ResourceCompat not found on classpath")
-    }
-  }
-
-  private fun registerViewEditModeInterception() {
-    val viewClass = Class.forName("android.view.View")
-    InterceptorRegistrar.addMethodInterceptor(
-        viewClass, "isInEditMode", EditModeInterceptor::class.java
-    )
-  }
-
-  private fun registerMatrixMultiplyInterception() {
-    val matrixClass = Class.forName("android.opengl.Matrix")
-    InterceptorRegistrar.addMethodInterceptors(
-      matrixClass,
-      setOf(
-        "multiplyMM" to MatrixMatrixMultiplicationInterceptor::class.java,
-        "multiplyMV" to MatrixVectorMultiplicationInterceptor::class.java
-      )
-    )
-  }
 
   private class PaparazziComposeOwner private constructor() : LifecycleOwner, SavedStateRegistryOwner {
     private val lifecycleRegistry: LifecycleRegistry = LifecycleRegistry(this)

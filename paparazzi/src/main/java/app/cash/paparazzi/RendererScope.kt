@@ -5,11 +5,13 @@ import android.util.AttributeSet
 import android.view.BridgeInflater
 import android.view.LayoutInflater
 import android.view.View
+import app.cash.paparazzi.agent.InterceptorRegistrar
 import app.cash.paparazzi.internal.PaparazziLogger
 import app.cash.paparazzi.internal.Renderer
 import app.cash.paparazzi.internal.SessionParamsBuilder
 import com.android.ide.common.rendering.api.Result
 import com.android.ide.common.rendering.api.SessionParams
+import com.android.ide.common.rendering.api.ViewInfo
 import com.android.layoutlib.bridge.Bridge.cleanupThread
 import com.android.layoutlib.bridge.Bridge.prepareThread
 import com.android.layoutlib.bridge.BridgeRenderSession
@@ -25,8 +27,10 @@ open class RendererScope : ExternalResource() {
   private val renderSessions = mutableMapOf<SessionParamsBuilder, PaparazziRenderSession>()
   private var currentRenderSession: RenderSessionImpl? = null
 
-  init {
+  internal fun setup(logger: PaparazziLogger) {
     prepareThread()
+    registerDefaultMethodInterceptors(logger)
+    InterceptorRegistrar.registerMethodInterceptors()
   }
 
   internal fun renderSession(forParams: SessionParamsBuilder, logger: PaparazziLogger) : PaparazziRenderSession {
@@ -62,6 +66,7 @@ open class RendererScope : ExternalResource() {
   }
 
   val isInitialized get() = ::renderer.isInitialized
+
   override fun after() { close() }
 
   internal fun close() {
@@ -69,6 +74,7 @@ open class RendererScope : ExternalResource() {
     renderSessions.forEach { (_, value) -> value.dispose() }
     renderer.close()
     cleanupThread()
+    InterceptorRegistrar.clearMethodInterceptors()
   }
 
 }
@@ -79,7 +85,7 @@ internal class PaparazziRenderSession(
   val bridgeSession: BridgeRenderSession
 ) {
 
-  val rootViews get() = bridgeSession.rootViews
+  val rootViews: List<ViewInfo> get() = bridgeSession.rootViews
 
   val image: BufferedImage get() = bridgeSession.image
 
