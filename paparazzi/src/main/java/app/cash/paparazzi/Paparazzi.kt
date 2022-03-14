@@ -373,7 +373,6 @@ class Paparazzi @JvmOverloads constructor(
         }
   }
 
-
   private class PaparazziComposeOwner private constructor() : LifecycleOwner, SavedStateRegistryOwner {
     private val lifecycleRegistry: LifecycleRegistry = LifecycleRegistry(this)
     private val savedStateRegistryController = SavedStateRegistryController.create(this)

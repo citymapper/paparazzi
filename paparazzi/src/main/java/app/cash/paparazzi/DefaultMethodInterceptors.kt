@@ -1,16 +1,13 @@
 package app.cash.paparazzi
 
 import app.cash.paparazzi.agent.InterceptorRegistrar
-import app.cash.paparazzi.internal.EditModeInterceptor
-import app.cash.paparazzi.internal.MatrixMatrixMultiplicationInterceptor
-import app.cash.paparazzi.internal.MatrixVectorMultiplicationInterceptor
-import app.cash.paparazzi.internal.PaparazziLogger
-import app.cash.paparazzi.internal.ResourcesInterceptor
+import app.cash.paparazzi.internal.*
 
 internal fun registerDefaultMethodInterceptors(logger: PaparazziLogger) {
     registerFontLookupInterceptionIfResourceCompatDetected(logger)
     registerViewEditModeInterception()
     registerMatrixMultiplyInterception()
+    registerChoreographerDelegateInterception()
 }
 
 /**
@@ -48,5 +45,12 @@ private fun registerMatrixMultiplyInterception() {
             "multiplyMM" to MatrixMatrixMultiplicationInterceptor::class.java,
             "multiplyMV" to MatrixVectorMultiplicationInterceptor::class.java
         )
+    )
+}
+
+private fun registerChoreographerDelegateInterception() {
+    val choreographerDelegateClass = Class.forName("android.view.Choreographer_Delegate")
+    InterceptorRegistrar.addMethodInterceptor(
+        choreographerDelegateClass, "getFrameTimeNanos", ChoreographerDelegateInterceptor::class.java
     )
 }
