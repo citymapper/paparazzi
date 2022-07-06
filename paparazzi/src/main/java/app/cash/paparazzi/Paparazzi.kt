@@ -52,14 +52,12 @@ import com.android.internal.lang.System_Delegate
 import com.android.layoutlib.bridge.Bridge
 import com.android.layoutlib.bridge.impl.RenderAction
 import com.android.layoutlib.bridge.impl.RenderSessionImpl
-import java.awt.image.BufferedImage
-import java.lang.reflect.Field
-import java.lang.reflect.Modifier
-import java.util.Date
-import java.util.concurrent.TimeUnit
 import org.junit.rules.TestRule
 import org.junit.runner.Description
 import org.junit.runners.model.Statement
+import java.awt.image.BufferedImage
+import java.util.Date
+import java.util.concurrent.TimeUnit
 
 class Paparazzi @JvmOverloads constructor(
   private val environment: Environment = detectEnvironment(),
@@ -115,7 +113,15 @@ class Paparazzi @JvmOverloads constructor(
   }
 
   fun prepare(description: Description) {
-    forcePlatformSdkVersion(environment.compileSdkVersion)
+    if (environment.compileSdkVersion > 32) {
+      // The version of layout we're using only works up to SDK level 32, so we need to coerce
+      // the compileSdkVersion down to 32
+      forceBuildVersionProp("SDK_INT", 32)
+      forceBuildVersionProp("CODENAME", "Sv2")
+    } else {
+      // Otherwise we just pass through the compile sdk
+      forceBuildVersionProp("SDK_INT", environment.compileSdkVersion)
+    }
 
     val layoutlibCallback =
       PaparazziCallback(logger, environment.packageName, environment.resourcePackageNames)
@@ -341,29 +347,7 @@ class Paparazzi @JvmOverloads constructor(
     return TestName(packageName, className, methodName)
   }
 
-  private fun forcePlatformSdkVersion(compileSdkVersion: Int) {
-    val modifiersField =
-      try {
-        Field::class.java.getDeclaredField("modifiers")
-      } catch (e: NoSuchFieldException) {
-        // Hack for Java 12+ access
-        // https://stackoverflow.com/q/56039341
-        // https://github.com/powermock/powermock/commit/66ce9f77215bae68b45f35481abc8b52a5d5b6ae#diff-21c1fc51058efd316026f11f34f51c5c
-        try {
-          val getDeclaredFields0 =
-            Class::class.java.getDeclaredMethod(
-                "getDeclaredFields0", Boolean::class.javaPrimitiveType
-            )
-          getDeclaredFields0.isAccessible = true
-          val fields = getDeclaredFields0.invoke(Field::class.java, false) as Array<Field>
-          fields.find { it.name == "modifiers" } ?: throw e
-        } catch (ex: Exception) {
-          e.addSuppressed(ex)
-          throw e
-        }
-      }
-    modifiersField.isAccessible = true
-
+  private fun forceBuildVersionProp(name: String, value: Any) {
     val versionClass = try {
       Paparazzi::class.java.classLoader.loadClass("android.os.Build\$VERSION")
     } catch (e: ClassNotFoundException) {
@@ -371,12 +355,8 @@ class Paparazzi @JvmOverloads constructor(
     }
 
     versionClass
-        .getDeclaredField("SDK_INT")
-        .apply {
-          isAccessible = true
-          modifiersField.setInt(this, modifiers and Modifier.FINAL.inv())
-          setInt(null, compileSdkVersion)
-        }
+      .getFieldReflectively(name)
+      .setStaticValue(value)
   }
 
   private class PaparazziComposeOwner private constructor() : LifecycleOwner, SavedStateRegistryOwner {
